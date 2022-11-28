@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+
+EnsureSConsVersion(3, 0, 0)
+EnsurePythonVersion(3, 6)
+
+import os
+import sys
+import time
+from types import ModuleType
+from importlib.util import spec_from_file_location, module_from_spec
+
+def _helper_module(name, path):
+    spec = spec_from_file_location(name, path)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules[name] = module
+
+    child_module = module
+    parent_name = name
+    while True:
+        try:
+            parent_name, child_name = parent_name.rsplit(".", 1)
+        except ValueError:
+            break
+        try:
+            parent_module = sys.modules[parent_name]
+        except KeyError:
+            parent_module = ModuleType(parent_name)
+            sys.modules[parent_name] = parent_module
+        setattr(parent_module, child_name, child_module)
+
+_helper_module("methods", "methods.py")
+# _helper_module("main.main_builders", "main/main_builders.py")
+
+
+import methods
+
+
+platform_list = ["windows"]
+platform_opts = {}
+platform_flags = {}
+
+custom_tools = ["default"]
+
+env_base = Environment(tools=custom_tools) # tools默认就是default
+
+env_base.PrependENVPath("PATH", os.getenv("PATH"))
+env_base.PrependENVPath("PKG_CONFIG_PATH", os.getenv("PKG_CONFIG_PATH"))
+
+# python中支持以下runtime特性
+# 1. 可以往类的对象中，新增成员变量或成员函数，达到拓展的目的，类的其他对象也可以访问该变量和函数
+env_base.msvc = False
+
+env_base.__class__.add_source_files = methods.add_source_files
+env_base.__class__.add_library = methods.add_library
+env_base.__class__.add_program = methods.add_program
+
+
+customs = ["custom.py"]
+
+profile = ARGUMENTS.get("profile", "")
+if profile:
+    if os.path.isfile(profile):
+        customs.append(profile)
+    elif os.path.isfile(profile + ".py"):
+        customs.append(profile + ".py")
+
+opts = Variables(customs, ARGUMENTS)
+
+# Target build options
+opts.Add("platform", "Target platform (%s)" % ("|".join(platform_list),), "")
+opts.Add(EnumVariable("target", "Compilation target", "editor", ("editor", "template_release", "template_debug")))
+
+# Advanced options
+opts.Add("vsproj", "Generate a Visual Studio solution", True)
+
+# Compilation environment setup
+opts.Add("CXX", "C++ compiler")
+opts.Add("CC", "C compiler")
+opts.Add("LINK", "Linker")
+opts.Add("CCFLAGS", "Custom flags for both the C and C++ compilers")
+opts.Add("CFLAGS", "Custom flags for both the C compilers")
+opts.Add("CXXFLAGS", "Custom flags for both the C++ compilers")
+opts.Add("LINKFLAGS", "Custom flags for the linker")
+
+opts.Update(env_base)
+
+selected_platform = ""
+
+if env_base["platform"] != "":
+    selected_platform = env_base["platform"]
+# elif env_base["p"] != "":
+#     selected_platform = env_base["p"]
+else:
+    if sys.platform == "win32":
+        selected_platform = "windows"
+
+env_base["platform"] = selected_platform
+
+env_base.Prepend(CPPPATH=["#"])
+
+if selected_platform in platform_list:
+    tmppath = "./platform/" + selected_platform
+    sys.path.insert(0, tmppath)
+
+    env = env_base.Clone()
+
+    initial_num_jobs = env.GetOption("num_jobs")
+    altered_num_jobs = initial_num_jobs + 1
+    env.SetOption("num_jobs", altered_num_jobs)
+    if env.GetOption("num_jobs") == altered_num_jobs:
+        cpu_count = os.cpu_count()
+        if cpu_count is None:
+            print("Couldn't auto-detect CPU count to configure build parallelism. Specify it with the -j argument.")
+        else:
+            safer_cpu_count = cpu_count if cpu_count <= 4 else cpu_count - 1
+            print(
+                "Auto-detected %d CPU cores available for build parallelism. Using %d cores by default. You can override it with the -j argument."
+                % (cpu_count, safer_cpu_count)
+            )
+            env.SetOption("num_jobs", safer_cpu_count)
+
+    Export("env")
+    
+    # Build subdirs, the build order is dependent on link order
+    SConscript("main/SCsub")
+
+    # if env["vsproj"]:
+    #     if os.name != "nt":
+    #         print("Error: The 'vsproj' option is only usable on Windows with Visual Studio")
+    #         Exit(255)
+    #     env["CPPPATH"] = [Dir(path) for path in env["CPPPATH"]]
+    #     methods.generate_vs_project(env, GetOption("num_jobs"))
+
+    

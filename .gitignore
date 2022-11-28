@@ -1,0 +1,4 @@
+﻿*.dblite
+__pycache__
+main/main.lib
+main/main.obj
