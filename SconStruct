@@ -120,6 +120,10 @@ if selected_platform in platform_list:
             )
             env.SetOption("num_jobs", safer_cpu_count)
 
+    if env["vsproj"]:
+        env.vs_incs = []
+        env.vs_srcs = []
+
     Export("env")
     
     # Build subdirs, the build order is dependent on link order

@@ -1,4 +1,9 @@
-﻿*.dblite
+﻿# SCons generated
+*.dblite
+
+# Python generated
 __pycache__
-main/main.lib
-main/main.obj
+
+# C++ generated
+*.obj
+*.lib
